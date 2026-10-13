@@ -118,12 +118,16 @@ def _seed_token_file() -> str | None:
     return data
 
 
-# Must happen before importing garmin_mcp: it reads GARMINTOKENS at import.
 os.environ["GARMINTOKENS"] = _TOKEN_DIR
 _last_saved = _seed_token_file()
 _save_lock = threading.Lock()
 
 import garmin_mcp as core  # noqa: E402
+
+# The package __init__ is imported before this module runs, so its
+# import-time token paths still point at ~/. Redirect them to /tmp.
+core.tokenstore = _TOKEN_DIR
+core.tokenstore_base64 = os.path.join(tempfile.gettempdir(), "garmin-tokens-b64")
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager  # noqa: E402
 
 
@@ -202,7 +206,7 @@ async def app(scope, receive, send):
         await _send_json(send, 200, {"ok": True, "login": _pending.login_state()})
         return
     if len(secret) < 24 or not hmac.compare_digest(path.encode(), expected.encode()):
-        await _send_json(send, 404, {"error": "not found"})
+        await _send_json(send, 404, {"error": "not found", "path": path})
         return
 
     manager = StreamableHTTPSessionManager(
