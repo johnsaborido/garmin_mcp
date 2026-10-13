@@ -5,7 +5,7 @@ data from any chat (including phone) without a computer switched on.
 
 ## How it works
 
-- `api/index.py` serves `garmin_mcp.cloud.app`, which is the normal server
+- `app.py` serves `garmin_mcp.cloud.app`, which is the normal server
   with every request handled on a stateless HTTP transport.
 - The MCP endpoint is `https://<project>.vercel.app/mcp/<GARMIN_MCP_SECRET>`.
   Every other path returns 404, so the secret in the URL acts as the password.
