@@ -594,6 +594,85 @@ def init_api(email, password):
     return garmin
 
 
+def build_server(
+    garmin_client,
+    enabled_tools,
+    disabled_tools,
+    host="127.0.0.1",
+    port=8000,
+    stateless_http=False,
+    **fastmcp_kwargs,
+):
+    """Create the FastMCP app and register every tool against ``garmin_client``.
+
+    Shared by ``main()`` (stdio / self-hosted HTTP) and ``garmin_mcp.cloud``
+    (serverless HTTP on Vercel). Returns ``(fastmcp, filtered_app)``.
+    """
+    # Configure all modules with the Garmin client
+    activity_management.configure(garmin_client)
+    health_wellness.configure(garmin_client)
+    user_profile.configure(garmin_client)
+    devices.configure(garmin_client)
+    gear_management.configure(garmin_client)
+    weight_management.configure(garmin_client)
+    challenges.configure(garmin_client)
+    training.configure(garmin_client)
+    workouts.configure(garmin_client)
+    data_management.configure(garmin_client)
+    womens_health.configure(garmin_client)
+    nutrition.configure(garmin_client)
+    workout_builders.configure(garmin_client)
+    courses.configure(garmin_client)
+    activity_analysis.configure(garmin_client)
+    calendar_events.configure(garmin_client)
+
+    # Create the MCP app, wrapped so the env-var filter can drop tools.
+    # host/port only matter for the HTTP transports; stdio ignores them.
+    fastmcp = FastMCP(
+        "Garmin Connect v1.0",
+        host=host,
+        port=port,
+        stateless_http=stateless_http,
+        **fastmcp_kwargs,
+    )
+    app = _ToolFilter(fastmcp, enabled_tools, disabled_tools)
+    if enabled_tools:
+        print(f"Tool filter: allowlist of {len(enabled_tools)} tool(s).", file=sys.stderr)
+    elif disabled_tools:
+        print(f"Tool filter: denylist of {len(disabled_tools)} tool(s).", file=sys.stderr)
+
+    # Register tools from all modules
+    app = activity_management.register_tools(app)
+    app = health_wellness.register_tools(app)
+    app = user_profile.register_tools(app)
+    app = devices.register_tools(app)
+    app = gear_management.register_tools(app)
+    app = weight_management.register_tools(app)
+    app = challenges.register_tools(app)
+    app = training.register_tools(app)
+    app = workouts.register_tools(app)
+    app = data_management.register_tools(app)
+    app = womens_health.register_tools(app)
+    app = nutrition.register_tools(app)
+    app = workout_builders.register_tools(app)
+    app = courses.register_tools(app)
+    app = activity_analysis.register_tools(app)
+    app = calendar_events.register_tools(app)
+
+    # Register resources (workout templates)
+    app = workout_templates.register_resources(app)
+
+    # Warn about filter entries that matched no tool (most likely typos)
+    unknown = app.unknown_filter_names()
+    if unknown:
+        print(
+            f"Tool filter: warning — name(s) not found and ignored: {', '.join(unknown)}",
+            file=sys.stderr,
+        )
+
+    return fastmcp, app
+
+
 def main():
     """Initialize the MCP server and register all tools"""
 
@@ -636,66 +715,14 @@ def main():
     pending_client.start(lambda: init_api(email, password))
     garmin_client = _GarminProxy(pending_client)
 
-    # Configure all modules with the Garmin client
-    activity_management.configure(garmin_client)
-    health_wellness.configure(garmin_client)
-    user_profile.configure(garmin_client)
-    devices.configure(garmin_client)
-    gear_management.configure(garmin_client)
-    weight_management.configure(garmin_client)
-    challenges.configure(garmin_client)
-    training.configure(garmin_client)
-    workouts.configure(garmin_client)
-    data_management.configure(garmin_client)
-    womens_health.configure(garmin_client)
-    nutrition.configure(garmin_client)
-    workout_builders.configure(garmin_client)
-    courses.configure(garmin_client)
-    activity_analysis.configure(garmin_client)
-    calendar_events.configure(garmin_client)
-
-    # Create the MCP app, wrapped so the env-var filter can drop tools.
-    # host/port only matter for the HTTP transports; stdio ignores them.
-    fastmcp = FastMCP(
-        "Garmin Connect v1.0",
+    fastmcp, app = build_server(
+        garmin_client,
+        enabled_tools,
+        disabled_tools,
         host=http_host,
         port=http_port,
         stateless_http=stateless_http,
     )
-    app = _ToolFilter(fastmcp, enabled_tools, disabled_tools)
-    if enabled_tools:
-        print(f"Tool filter: allowlist of {len(enabled_tools)} tool(s).", file=sys.stderr)
-    elif disabled_tools:
-        print(f"Tool filter: denylist of {len(disabled_tools)} tool(s).", file=sys.stderr)
-
-    # Register tools from all modules
-    app = activity_management.register_tools(app)
-    app = health_wellness.register_tools(app)
-    app = user_profile.register_tools(app)
-    app = devices.register_tools(app)
-    app = gear_management.register_tools(app)
-    app = weight_management.register_tools(app)
-    app = challenges.register_tools(app)
-    app = training.register_tools(app)
-    app = workouts.register_tools(app)
-    app = data_management.register_tools(app)
-    app = womens_health.register_tools(app)
-    app = nutrition.register_tools(app)
-    app = workout_builders.register_tools(app)
-    app = courses.register_tools(app)
-    app = activity_analysis.register_tools(app)
-    app = calendar_events.register_tools(app)
-
-    # Register resources (workout templates)
-    app = workout_templates.register_resources(app)
-
-    # Warn about filter entries that matched no tool (most likely typos)
-    unknown = app.unknown_filter_names()
-    if unknown:
-        print(
-            f"Tool filter: warning — name(s) not found and ignored: {', '.join(unknown)}",
-            file=sys.stderr,
-        )
 
     # When serving over HTTP, expose liveness/readiness endpoints for k8s probes.
     # The MCP endpoint itself requires a handshake and isn't probe-friendly.
